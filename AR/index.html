@@ -3,13 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>VFI Model — Image-Tracked WebAR</title>
+  <title>VFI Model — Image‑Tracked WebAR (Layers)</title>
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+    html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
     #app { position:fixed; inset:0; overflow:hidden; }
     .ui { position:fixed; inset:0; display:grid; place-items:start center; pointer-events:none; padding:16px; }
-    .panel { pointer-events:auto; background:rgba(12,12,14,.7); backdrop-filter:blur(6px);
-             border-radius:14px; padding:14px 16px; max-width:720px; width:min(720px,calc(100% - 32px)); box-shadow:0 12px 30px rgba(0,0,0,.35); }
+    .panel { pointer-events:auto; background:rgba(12,12,14,.7); backdrop-filter:blur(6px); border-radius:14px; padding:14px 16px; max-width:720px; width:min(720px,calc(100% - 32px)); box-shadow:0 12px 30px rgba(0,0,0,.35); }
     .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
     .hint { font-size:12px; opacity:.85; margin-top:6px; }
     .hidden { display:none !important; }
@@ -20,29 +19,22 @@
     .toggle input { width:18px; height:18px; accent-color:#4f46e5; }
     body { padding: env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0); }
   </style>
-
   <!-- Three.js -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-
   <script>
-    // Robust loader for MindAR with CDN fallback
-    function loadMindAR() {
-      return new Promise((resolve, reject) => {
-        const urls = [
-          "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js",
-          "https://unpkg.com/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
-        ];
-        const tryNext = () => {
-          const url = urls.shift();
-          if (!url) return reject(new Error("Failed to load MindAR from CDNs."));
-          const s = document.createElement("script");
-          s.src = url;
-          s.onload = () => resolve();
-          s.onerror = () => { console.warn("Failed to load:", url); tryNext(); };
-          document.head.appendChild(s);
-        };
-        tryNext();
-      });
+    // Robust MindAR loader with CDN fallback (jsDelivr → unpkg) and local override support
+    async function loadMindAR() {
+      const urls = [
+        'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js',
+        'https://unpkg.com/mind-ar@1.2.5/dist/mindar-image-three.prod.js'
+      ];
+      for (const url of urls) {
+        try {
+          await new Promise((res, rej) => { const s=document.createElement('script'); s.src=url; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+          if (window.MINDAR && window.MINDAR.IMAGE) return;
+        } catch(e) { /* try next */ }
+      }
+      throw new Error('Failed to load MindAR from CDNs. Consider hosting the file locally.');
     }
   </script>
 </head>
@@ -51,7 +43,7 @@
 
   <div class="ui">
     <div id="panel" class="panel">
-      <h1>Start AR 03</h1>
+      <h1>Start AR 04</h1>
       <div class="row">
         <button id="startBtn">Enable Camera</button>
         <button id="flipBtn" class="secondary">Flip Camera</button>
@@ -66,59 +58,53 @@
     </div>
   </div>
 
-  <!-- tiny preloader element for images -->
   <img id="_preImg" class="hidden" />
 
   <script>
-    const TARGETS_FILE = "targets.mind";       // adjust if in a subfolder
-    const MODEL_WIDTH_M = 0.15;                // 150mm
-    const LAYERS = [
-      { id: "Aerial + massing",       src: "layers/1.png", width: MODEL_WIDTH_M },
-      { id: "Grass + roads (render)", src: "layers/2.png", width: MODEL_WIDTH_M },
-      { id: "Linework (B/W)",         src: "layers/3.png", width: MODEL_WIDTH_M },
-      { id: "Simplified color plan",  src: "layers/4.png", width: MODEL_WIDTH_M },
-      { id: "Blank parcel mask",      src: "layers/5.png", width: MODEL_WIDTH_M }
+    // ===== Config =====
+    const TARGETS_FILE = 'targets.mind';      // adjust if in a subfolder
+    const MODEL_WIDTH_M = 0.15;               // 150mm
+    const LAYERS = [                          // files in /layers
+      { id:'Aerial + massing',       src:'layers/1.png', width: MODEL_WIDTH_M },
+      { id:'Grass + roads (render)', src:'layers/2.png', width: MODEL_WIDTH_M },
+      { id:'Linework (B/W)',         src:'layers/3.png', width: MODEL_WIDTH_M },
+      { id:'Simplified color plan',  src:'layers/4.png', width: MODEL_WIDTH_M },
+      { id:'Blank parcel mask',      src:'layers/5.png', width: MODEL_WIDTH_M }
     ];
 
-    const appEl = document.getElementById("app");
-    const startBtn = document.getElementById("startBtn");
-    const flipBtn  = document.getElementById("flipBtn");
-    const showAllBtn = document.getElementById("showAll");
-    const hideAllBtn = document.getElementById("hideAll");
-    const layerToggles = document.getElementById("layerToggles");
-    const statusEl = document.getElementById("status");
+    // ===== Runtime =====
+    const appEl = document.getElementById('app');
+    const startBtn = document.getElementById('startBtn');
+    const flipBtn  = document.getElementById('flipBtn');
+    const showAllBtn = document.getElementById('showAll');
+    const hideAllBtn = document.getElementById('hideAll');
+    const layerToggles = document.getElementById('layerToggles');
+    const statusEl = document.getElementById('status');
 
     let mindarThree, renderer, scene, camera, anchor, overlayRoot;
-    let currentFacingMode = "environment";
+    let currentFacingMode = 'environment';
     const meshes = new Map();
 
-    // UI toggles
+    function status(msg){ statusEl.textContent = msg || ''; }
+
+    // Build UI toggles
     LAYERS.forEach(layer => {
-      const wrap = document.createElement("label");
-      wrap.className = "toggle";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = false;
-      cb.addEventListener("change", () => { const m = meshes.get(layer.id); if (m) m.visible = cb.checked; });
-      const span = document.createElement("span");
-      span.textContent = layer.id;
-      wrap.appendChild(cb); wrap.appendChild(span);
-      layerToggles.appendChild(wrap);
-      layer.__checkbox = cb;
+      const wrap = document.createElement('label'); wrap.className='toggle';
+      const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=false;
+      cb.addEventListener('change', () => { const m=meshes.get(layer.id); if (m) m.visible = cb.checked; });
+      const span = document.createElement('span'); span.textContent = layer.id;
+      wrap.appendChild(cb); wrap.appendChild(span); layerToggles.appendChild(wrap); layer.__checkbox = cb;
     });
-    showAllBtn.addEventListener("click", () => { LAYERS.forEach(l => { l.__checkbox.checked = true; const m = meshes.get(l.id); if (m) m.visible = true; }); });
-    hideAllBtn.addEventListener("click", () => { LAYERS.forEach(l => { l.__checkbox.checked = false; const m = meshes.get(l.id); if (m) m.visible = false; }); });
+    showAllBtn.addEventListener('click', () => { LAYERS.forEach(l => { l.__checkbox.checked = true; const m=meshes.get(l.id); if (m) m.visible = true; }); });
+    hideAllBtn.addEventListener('click', () => { LAYERS.forEach(l => { l.__checkbox.checked = false; const m=meshes.get(l.id); if (m) m.visible = false; }); });
 
-    function status(msg) { statusEl.textContent = msg || ""; }
-
-    async function assertMindFile() {
-      const res = await fetch(TARGETS_FILE, { method: "HEAD" });
+    async function assertMindFile(){
+      const res = await fetch(TARGETS_FILE, { method:'HEAD' });
       if (!res.ok) throw new Error(`Could not load ${TARGETS_FILE} (HTTP ${res.status}). Check path/case.`);
     }
 
-    async function buildImageMesh(src, widthM) {
-      const img = document.getElementById("_preImg");
-      img.src = src; await img.decode().catch(()=>{});
+    async function buildImageMesh(src, widthM){
+      const img = document.getElementById('_preImg'); img.src = src; await img.decode().catch(()=>{});
       const tex = new THREE.Texture(img); tex.needsUpdate = true;
       const aspect = (img.naturalWidth && img.naturalHeight) ? img.naturalWidth / img.naturalHeight : 1;
       const geom = new THREE.PlaneGeometry(widthM, widthM / aspect);
@@ -126,61 +112,48 @@
       return new THREE.Mesh(geom, mat);
     }
 
-    async function stopAR() {
-      try { if (mindarThree) { await mindarThree.stop(); mindarThree.renderer.setAnimationLoop(null); while (appEl.firstChild) appEl.removeChild(appEl.firstChild); mindarThree = null; } } catch(e) {}
+    async function stopAR(){
+      try { if (mindarThree) { await mindarThree.stop(); mindarThree.renderer.setAnimationLoop(null); while (appEl.firstChild) appEl.removeChild(appEl.firstChild); mindarThree = null; } } catch(e){}
     }
 
-    async function initAR() {
+    async function initAR(){
       await stopAR();
       try {
-        status("Loading MindAR…");
-        await loadMindAR();                             // ensure library is present
-        if (!window.MINDAR || !window.MINDAR.IMAGE) {
-          throw new Error("MindAR library not loaded or IMAGE module missing.");
-        }
-        await assertMindFile();                         // early check for targets.mind
+        status('Loading MindAR…');
+        await loadMindAR();
+        if (!window.MINDAR || !window.MINDAR.IMAGE) throw new Error('MindAR library not loaded or IMAGE module missing.');
+        status('Checking targets…');
+        await assertMindFile();
 
         const { MindARThree } = window.MINDAR.IMAGE;
-        mindarThree = new MindARThree({
-          container: appEl,
-          imageTargetSrc: TARGETS_FILE,
-          maxTrack: 1,
-          uiLoading: true,
-          uiScanning: true,
-          facingMode: currentFacingMode
-        });
+        mindarThree = new MindARThree({ container: appEl, imageTargetSrc: TARGETS_FILE, maxTrack: 1, uiLoading:true, uiScanning:true, facingMode: currentFacingMode });
 
         ({renderer, scene, camera} = mindarThree);
         scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
 
         anchor = mindarThree.addAnchor(0);
-        overlayRoot = new THREE.Group();
-        anchor.group.add(overlayRoot);
+        overlayRoot = new THREE.Group(); anchor.group.add(overlayRoot);
 
         for (const layer of LAYERS) {
-          const mesh = await buildImageMesh(layer.src, layer.width);
-          mesh.visible = false;
-          overlayRoot.add(mesh);
-          meshes.set(layer.id, mesh);
+          const mesh = await buildImageMesh(layer.src, layer.width); mesh.visible = false; overlayRoot.add(mesh); meshes.set(layer.id, mesh);
         }
 
-        status("Starting camera…");
+        status('Starting camera…');
         await mindarThree.start();
-        document.getElementById("panel").classList.add("hidden");
-        status("");
+        document.getElementById('panel').classList.add('hidden');
+        status('');
         renderer.setAnimationLoop(() => renderer.render(scene, camera));
       } catch (err) {
-        status("⚠️ " + err.message);
-        alert("Error starting AR: " + err.message);
+        status('⚠️ ' + err.message);
+        alert('Error starting AR: ' + err.message);
         console.error(err);
       }
     }
 
-    startBtn.addEventListener("click", initAR);
-    flipBtn.addEventListener("click", async () => { currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment"; await initAR(); });
+    startBtn.addEventListener('click', initAR);
+    flipBtn.addEventListener('click', async () => { currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment'; await initAR(); });
 
-    // Stop camera when tab hidden (saves battery)
-    document.addEventListener("visibilitychange", async () => { if (document.hidden) { await stopAR(); document.getElementById("panel").classList.remove("hidden"); } });
+    document.addEventListener('visibilitychange', async () => { if (document.hidden) { await stopAR(); document.getElementById('panel').classList.remove('hidden'); } });
   </script>
 </body>
 </html>
