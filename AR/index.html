@@ -3,68 +3,63 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>VFI Model — Image‑Tracked WebAR (Layers)</title>
+  <title>VFI Model — Image‑Tracked WebAR</title>
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-    #app { position:fixed; inset:0; overflow:hidden; }
-    .ui { position:fixed; inset:0; display:grid; place-items:start center; pointer-events:none; padding:16px; }
-    .panel { pointer-events:auto; background:rgba(12,12,14,.7); backdrop-filter:blur(6px); border-radius:14px; padding:14px 16px; max-width:720px; width:min(720px,calc(100% - 32px)); box-shadow:0 12px 30px rgba(0,0,0,.35); }
-    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-    .hint { font-size:12px; opacity:.85; margin-top:6px; }
-    .hidden { display:none !important; }
-    button { cursor:pointer; border:0; border-radius:12px; padding:10px 14px; font-weight:600; background:#4f46e5; color:#fff; }
-    button.secondary { background:#374151; }
-    .layers { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-    .toggle { background:#1f2937; padding:8px 10px; border-radius:10px; display:flex; align-items:center; gap:8px; }
-    .toggle input { width:18px; height:18px; accent-color:#4f46e5; }
-    body { padding: env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0); }
-  </style>
-  <!-- Three.js -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-  <script>
-    // Robust MindAR loader with CDN fallback (jsDelivr → unpkg) and local override support
-    async function loadMindAR() {
-      const urls = [
-        'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js',
-        'https://unpkg.com/mind-ar@1.2.5/dist/mindar-image-three.prod.js'
-      ];
-      for (const url of urls) {
-        try {
-          await new Promise((res, rej) => { const s=document.createElement('script'); s.src=url; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
-          if (window.MINDAR && window.MINDAR.IMAGE) return;
-        } catch(e) { /* try next */ }
-      }
-      throw new Error('Failed to load MindAR from CDNs. Consider hosting the file locally.');
+    :root { color-scheme: light dark; }
+    html, body { margin:0; height:100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #app { position: fixed; inset: 0; display: grid; place-items: center; background:#000; }
+    #panel {
+      position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 12px 14px;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(6px);
+      color: #fff; display: grid; row-gap: 6px; z-index: 10;
     }
+    #panel.hidden { display: none; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button, .chip {
+      appearance: none; border: 1px solid rgba(255,255,255,.25);
+      background: rgba(255,255,255,.1); color: #fff; padding: 8px 12px; border-radius: 999px;
+      font: inherit; cursor: pointer;
+    }
+    button:disabled { opacity:.5; cursor: not-allowed; }
+    .chip { display:inline-flex; align-items:center; gap:8px; }
+    .chip input { accent-color: #6cf; width: 16px; height:16px; }
+    #status { position: fixed; top: 10px; left: 10px; right: 10px; color: #fff; text-shadow: 0 1px 2px #000; z-index: 10;}
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  </style>
+
+  <!-- Map bare module imports that MindAR uses -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/"
+    }
+  }
   </script>
 </head>
 <body>
-  <div id="app"></div>
-
-  <div class="ui">
-    <div id="panel" class="panel">
-      <h1>Start AR 04</h1>
+  <div id="app">
+    <div id="status">Ready. Tap “Start AR” and point at the target image.</div>
+    <div id="panel">
       <div class="row">
-        <button id="startBtn">Enable Camera</button>
-        <button id="flipBtn" class="secondary">Flip Camera</button>
+        <button id="startBtn">▶︎ Start AR</button>
+        <button id="flipBtn">↺ Flip Camera</button>
+        <button id="showAll">Show all layers</button>
+        <button id="hideAll">Hide all</button>
       </div>
-      <div class="row" style="margin-top:8px;gap:8px;">
-        <button id="showAll" class="secondary">Show all</button>
-        <button id="hideAll" class="secondary">Hide all</button>
-      </div>
-      <div id="status" class="hint"></div>
-      <div class="hint">Point your phone at the engraved corner target. Layers are sized to model width (150 mm).</div>
-      <div id="layerToggles" class="layers"></div>
+      <div id="layerToggles" class="row" aria-label="Layer toggles"></div>
     </div>
   </div>
 
-  <img id="_preImg" class="hidden" />
+  <!-- Your AR app as an ES module -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { MindARThree } from './libs/mindar-image-three.prod.js';
 
-  <script>
-    // ===== Config =====
-    const TARGETS_FILE = 'targets.mind';      // adjust if in a subfolder
-    const MODEL_WIDTH_M = 0.15;               // 150mm
-    const LAYERS = [                          // files in /layers
+    // ---- Config ----
+    const TARGETS_FILE = 'targets.mind';
+    const MODEL_WIDTH_M = 0.15; // 150mm physical width mapped to the target
+    const LAYERS = [
       { id:'Aerial + massing',       src:'layers/1.png', width: MODEL_WIDTH_M },
       { id:'Grass + roads (render)', src:'layers/2.png', width: MODEL_WIDTH_M },
       { id:'Linework (B/W)',         src:'layers/3.png', width: MODEL_WIDTH_M },
@@ -72,88 +67,159 @@
       { id:'Blank parcel mask',      src:'layers/5.png', width: MODEL_WIDTH_M }
     ];
 
-    // ===== Runtime =====
-    const appEl = document.getElementById('app');
+    // ---- DOM ----
     const startBtn = document.getElementById('startBtn');
     const flipBtn  = document.getElementById('flipBtn');
     const showAllBtn = document.getElementById('showAll');
     const hideAllBtn = document.getElementById('hideAll');
     const layerToggles = document.getElementById('layerToggles');
     const statusEl = document.getElementById('status');
+    const panelEl = document.getElementById('panel');
 
-    let mindarThree, renderer, scene, camera, anchor, overlayRoot;
+    // ---- State ----
+    let mindar, renderer, scene, camera, anchor, overlayRoot;
     let currentFacingMode = 'environment';
     const meshes = new Map();
 
-    function status(msg){ statusEl.textContent = msg || ''; }
+    function status(msg){ statusEl.textContent = msg; }
 
-    // Build UI toggles
-    LAYERS.forEach(layer => {
-      const wrap = document.createElement('label'); wrap.className='toggle';
-      const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=false;
-      cb.addEventListener('change', () => { const m=meshes.get(layer.id); if (m) m.visible = cb.checked; });
-      const span = document.createElement('span'); span.textContent = layer.id;
-      wrap.appendChild(cb); wrap.appendChild(span); layerToggles.appendChild(wrap); layer.__checkbox = cb;
-    });
-    showAllBtn.addEventListener('click', () => { LAYERS.forEach(l => { l.__checkbox.checked = true; const m=meshes.get(l.id); if (m) m.visible = true; }); });
-    hideAllBtn.addEventListener('click', () => { LAYERS.forEach(l => { l.__checkbox.checked = false; const m=meshes.get(l.id); if (m) m.visible = false; }); });
+    function enableButtons(enabled){
+      [flipBtn, showAllBtn, hideAllBtn].forEach(b => b.disabled = !enabled);
+    }
+    enableButtons(false);
 
-    async function assertMindFile(){
-      const res = await fetch(TARGETS_FILE, { method:'HEAD' });
-      if (!res.ok) throw new Error(`Could not load ${TARGETS_FILE} (HTTP ${res.status}). Check path/case.`);
+    function disposeMindAR(){
+      if(mindar){
+        try { mindar.stop(); mindar.renderer?.dispose?.(); } catch(e){}
+      }
+      mindar = null; renderer = null; scene = null; camera = null; anchor = null; overlayRoot = null;
+      meshes.clear();
     }
 
-    async function buildImageMesh(src, widthM){
-      const img = document.getElementById('_preImg'); img.src = src; await img.decode().catch(()=>{});
-      const tex = new THREE.Texture(img); tex.needsUpdate = true;
-      const aspect = (img.naturalWidth && img.naturalHeight) ? img.naturalWidth / img.naturalHeight : 1;
-      const geom = new THREE.PlaneGeometry(widthM, widthM / aspect);
-      const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
-      return new THREE.Mesh(geom, mat);
+    function makePlaneFromTexture(tex, widthMeters){
+      const ar = tex.image.width / tex.image.height;
+      const geo = new THREE.PlaneGeometry(widthMeters, widthMeters / ar);
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+      const mesh = new THREE.Mesh(geo, mat);
+      // Place so that the plane sits centered on the target
+      mesh.position.set(0, 0, 0);
+      mesh.rotation.x = -Math.PI/2; // lay flat on target
+      return mesh;
     }
 
-    async function stopAR(){
-      try { if (mindarThree) { await mindarThree.stop(); mindarThree.renderer.setAnimationLoop(null); while (appEl.firstChild) appEl.removeChild(appEl.firstChild); mindarThree = null; } } catch(e){}
+    async function loadTexture(url){
+      return new Promise((resolve, reject) => {
+        new THREE.TextureLoader().load(url, tex => {
+          tex.encoding = THREE.sRGBEncoding;
+          tex.needsUpdate = true;
+          resolve(tex);
+        }, undefined, err => reject(err));
+      });
+    }
+
+    function buildLayerUI(){
+      layerToggles.innerHTML = '';
+      for(const { id } of LAYERS){
+        const label = document.createElement('label');
+        label.className = 'chip';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.id = id;
+        cb.addEventListener('change', () => {
+          const m = meshes.get(id);
+          if(m) m.visible = cb.checked;
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(id));
+        layerToggles.appendChild(label);
+      }
+      showAllBtn.onclick = () => { for(const [id,m] of meshes) { m.visible = true; const cb = layerToggles.querySelector('input[data-id="'+id+'"]'); if(cb) cb.checked = true; } };
+      hideAllBtn.onclick = () => { for(const [id,m] of meshes) { m.visible = false; const cb = layerToggles.querySelector('input[data-id="'+id+'"]'); if(cb) cb.checked = false; } };
     }
 
     async function initAR(){
-      await stopAR();
-      try {
-        status('Loading MindAR…');
-        await loadMindAR();
-        if (!window.MINDAR || !window.MINDAR.IMAGE) throw new Error('MindAR library not loaded or IMAGE module missing.');
-        status('Checking targets…');
-        await assertMindFile();
+      try{
+        enableButtons(false);
+        panelEl.classList.add('hidden');
+        status('Requesting camera…');
 
-        const { MindARThree } = window.MINDAR.IMAGE;
-        mindarThree = new MindARThree({ container: appEl, imageTargetSrc: TARGETS_FILE, maxTrack: 1, uiLoading:true, uiScanning:true, facingMode: currentFacingMode });
+        disposeMindAR();
 
-        ({renderer, scene, camera} = mindarThree);
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
+        mindar = new MindARThree({
+          container: document.body,
+          imageTargetSrc: TARGETS_FILE,
+          uiScanning: true,
+          uiLoading: 'yes',
+          filterMinCF: 0.0001,
+          filterBeta: 0.001,
+          maxTrack: 1,
+          warmupTolerance: 5,
+          // Camera
+          capture: currentFacingMode, // 'environment' | 'user'
+        });
 
-        anchor = mindarThree.addAnchor(0);
-        overlayRoot = new THREE.Group(); anchor.group.add(overlayRoot);
+        ({ renderer, scene, camera } = mindar);
+        const light = new THREE.HemisphereLight(0xffffff, 0x222222, 1.1);
+        scene.add(light);
 
-        for (const layer of LAYERS) {
-          const mesh = await buildImageMesh(layer.src, layer.width); mesh.visible = false; overlayRoot.add(mesh); meshes.set(layer.id, mesh);
+        // Anchor on image target #0
+        anchor = mindar.addAnchor(0);
+        overlayRoot = new THREE.Group();
+        anchor.group.add(overlayRoot);
+
+        // Load & place layers
+        status('Loading layers…');
+        buildLayerUI();
+        for(const { id, src, width } of LAYERS){
+          const tex = await loadTexture(src);
+          const mesh = makePlaneFromTexture(tex, width);
+          overlayRoot.add(mesh);
+          meshes.set(id, mesh);
         }
 
-        status('Starting camera…');
-        await mindarThree.start();
-        document.getElementById('panel').classList.add('hidden');
-        status('');
-        renderer.setAnimationLoop(() => renderer.render(scene, camera));
-      } catch (err) {
-        status('⚠️ ' + err.message);
-        alert('Error starting AR: ' + err.message);
+        // Start AR
+        await mindar.start();
+        status('Point your camera at the target.');
+        enableButtons(true);
+
+        // Render loop
+        const onFrame = () => {
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          renderer.render(scene, camera);
+          requestAnimationFrame(onFrame);
+        };
+        onFrame();
+
+      }catch(err){
+        status('⚠️ ' + (err?.message || err));
+        alert('Error starting AR: ' + (err?.message || err));
         console.error(err);
+        panelEl.classList.remove('hidden');
+        enableButtons(false);
       }
     }
 
+    // UI events
     startBtn.addEventListener('click', initAR);
-    flipBtn.addEventListener('click', async () => { currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment'; await initAR(); });
 
-    document.addEventListener('visibilitychange', async () => { if (document.hidden) { await stopAR(); document.getElementById('panel').classList.remove('hidden'); } });
+    flipBtn.addEventListener('click', async () => {
+      currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+      await initAR();
+    });
+
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'hidden') {
+        try { mindar?.pause(); } catch(e){}
+      } else {
+        try { mindar?.resume(); } catch(e){}
+      }
+    });
+
+    // If user loaded page over http or file:, explain why camera won't work
+    if (location.protocol !== 'https:') {
+      status('This page must be served over HTTPS for camera access.');
+    }
   </script>
 </body>
 </html>
