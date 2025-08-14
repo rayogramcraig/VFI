@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MindAR UMD — Known Good</title>
+  <style>
+    html,body{margin:0;height:100%;background:#0b0f14;color:#e6edf3;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    #ui{position:fixed;inset:0 0 auto 0;background:rgba(8,12,16,.85);backdrop-filter:blur(6px);padding:10px;display:flex;gap:8px;z-index:10}
+    button{background:#1f6feb;color:#fff;border:0;border-radius:10px;padding:10px 12px;font-weight:600;cursor:pointer}
+    button.secondary{background:#30363d}
+    #log{position:fixed;left:0;right:0;bottom:0;max-height:34%;overflow:auto;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;background:#0a0f14;border-top:1px solid #30363d;padding:8px 10px;white-space:pre-wrap}
+    #canvas-container{position:absolute;inset:0;top:56px}
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <button id="startBtn">Start AR</button>
+    <button id="flipBtn" class="secondary" disabled>Flip Camera</button>
+    <button id="showAllBtn" class="secondary" disabled>Show All</button>
+    <button id="hideAllBtn" class="secondary" disabled>Hide All</button>
+  </div>
+  <div id="canvas-container"></div>
+  <div id="log"></div>
+
+  <!-- Always use CDNs to avoid local UMD/ESM confusion -->
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const log = (m)=>{logEl.textContent += m + '\\n'; logEl.scrollTop=logEl.scrollHeight;};
+
+    if(!(location.protocol==='https:' || location.hostname==='localhost')){
+      log('Warning: Not a secure context. Use https or localhost, or the camera may be blocked.');
+    }
+
+    let mindarThree, renderer, scene, camera, anchor, planes=[], facingMode='environment', started=false;
+
+    async function init(){
+      if(!window.MINDAR || !MINDAR.IMAGE){
+        log('MindAR UMD not on window — this page expects UMD.'); return;
+      }
+      // quick check targets
+      try{ await fetch('./targets.mind',{method:'HEAD'}); }catch(e){ log('targets.mind not found at ./'); return; }
+
+      mindarThree = new MINDAR.IMAGE.MindARThree({
+        container: document.querySelector('#canvas-container'),
+        imageTargetSrc: './targets.mind',
+        uiScanning: true,
+        uiLoading: 'no',
+      });
+      ({renderer, scene, camera} = mindarThree);
+
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 1.2); scene.add(hemi);
+      anchor = mindarThree.addAnchor(0);
+      const loader = new THREE.TextureLoader();
+      const layerPaths = ['./layers/1.png','./layers/2.png','./layers/3.png','./layers/4.png','./layers/5.png'];
+
+      for(const p of layerPaths){
+        try{
+          const tex = await new Promise((res,rej)=>loader.load(p, res, undefined, rej));
+          tex.encoding = THREE.sRGBEncoding;
+          const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.MeshBasicMaterial({map:tex, transparent:true}));
+          mesh.visible=false;
+          planes.push(mesh);
+          anchor.group.add(mesh);
+          log('Loaded ' + p);
+        }catch(e){ log('Failed to load ' + p + ': ' + e.message); }
+      }
+
+      renderer.setAnimationLoop(()=>{ renderer.render(scene, camera); });
+
+      anchor.onTargetFound = ()=>log('Target found ✓');
+      anchor.onTargetLost = ()=>log('Target lost');
+    }
+
+    async function start(){
+      try{
+        if(!mindarThree) await init();
+        await mindarThree.start({ facingMode });
+        started = true;
+        document.getElementById('flipBtn').disabled = false;
+        document.getElementById('showAllBtn').disabled = false;
+        document.getElementById('hideAllBtn').disabled = false;
+        log('AR started ('+facingMode+')');
+      }catch(e){ log('Start error: ' + (e.message||e)); console.error(e); }
+    }
+
+    async function flip(){
+      if(!mindarThree) return;
+      facingMode = (facingMode==='environment') ? 'user' : 'environment';
+      try{ await mindarThree.stop(); }catch(_){}
+      await start();
+    }
+
+    function showAll(v){ planes.forEach(p=>p.visible=v); }
+
+    // UI bindings
+    document.getElementById('startBtn').addEventListener('click', start, {passive:true});
+    document.getElementById('flipBtn').addEventListener('click', flip, {passive:true});
+    document.getElementById('showAllBtn').addEventListener('click', ()=>showAll(true), {passive:true});
+    document.getElementById('hideAllBtn').addEventListener('click', ()=>showAll(false), {passive:true});
+
+    window.addEventListener('error', (e)=>log('Window error: '+e.message));
+    window.addEventListener('unhandledrejection', (e)=>log('Unhandled rejection: '+(e.reason?.message||e.reason)));
+  </script>
+</body>
+</html>

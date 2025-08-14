@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AR Image — Compatibility + Diagnostics</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#0b0f14; color:#e6edf3; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #ui { position: fixed; top: 0; left: 0; right: 0; background: rgba(8,12,16,0.85); backdrop-filter: blur(6px);
+          padding: 10px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; z-index: 10; }
+    #buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    button { background:#1f6feb; color:white; border:0; border-radius:10px; padding:10px 12px; font-weight:600; cursor:pointer; }
+    button.secondary { background:#30363d; color:#e6edf3; }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    #log { position: fixed; bottom: 0; left: 0; right: 0; max-height: 36%; overflow:auto; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+           background:#0a0f14; border-top:1px solid #30363d; padding:8px 10px; white-space: pre-wrap; }
+    #canvas-container { position: absolute; inset: 0; top: 58px; }
+    .tag { display:inline-block; padding:2px 6px; border-radius:999px; background:#30363d; color:#c9d1d9; margin-right:6px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>
+      <span class="tag" id="httpsTag">https?</span>
+      <span class="tag" id="permTag">camera?</span>
+      <span class="tag" id="deviceTag">devices?</span>
+      <span class="tag" id="libTag">libs?</span>
+      <span class="tag" id="trackerTag">tracker?</span>
+    </div>
+    <div id="buttons">
+      <button id="startBtn">Start AR</button>
+      <button id="flipBtn" class="secondary" disabled>Flip Camera</button>
+      <button id="showAllBtn" class="secondary" disabled>Show All</button>
+      <button id="hideAllBtn" class="secondary" disabled>Hide All</button>
+      <button id="selfTestBtn" class="secondary">Run Self‑Test</button>
+    </div>
+  </div>
+  <div id="canvas-container"></div>
+  <div id="log"></div>
+
+  <!-- Try local UMD libs first; fall back to CDN if not found -->
+  <script>
+    function addLog(msg, kind){
+      const el = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      el.textContent += `[${time}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+      if(kind){
+        const tagEl = document.getElementById(kind);
+        if(tagEl && !tagEl.classList.contains('ok')){
+          tagEl.style.background = '#238636'; // green
+          tagEl.textContent = tagEl.textContent.replace('?', '✓');
+          tagEl.classList.add('ok');
+        }
+      }
+    }
+    function tagFail(kind, label){
+      const tagEl = document.getElementById(kind);
+      if(tagEl){
+        tagEl.style.background = '#8b0000';
+        if(label) tagEl.textContent = label;
+      }
+    }
+
+    // HTTPS check
+    if(location.protocol === 'https:' || location.hostname === 'localhost'){
+      addLog('Secure context OK (https or localhost).', 'httpsTag');
+    } else {
+      addLog('Not a secure context. Browsers block camera on http/file. Serve over https.', null);
+      tagFail('httpsTag','https ✗');
+    }
+  </script>
+
+  <script src="./libs/three.min.js"
+          onload="addLog('three.min.js (local) loaded','libTag')"
+          onerror="this.onerror=null; this.src='https://unpkg.com/three@0.158.0/build/three.min.js'; addLog('three.min.js local missing — using CDN','libTag');">
+  </script>
+
+  <script src="./libs/mindar-image-three.prod.js"
+          onload="addLog('mindar-image-three (local) loaded','libTag')"
+          onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js'; addLog('mindar UMD local missing — using CDN','libTag');">
+  </script>
+
+  <script>
+    const log = (...args)=>addLog(args.join(' '));
+
+    // Global state
+    let mindarThree = null;
+    let renderer, scene, camera;
+    let anchor, planes = [];
+    let facingMode = 'environment';
+    let started = false;
+
+    function setButtons(enabled){
+      document.getElementById('flipBtn').disabled = !enabled;
+      document.getElementById('showAllBtn').disabled = !enabled;
+      document.getElementById('hideAllBtn').disabled = !enabled;
+    }
+
+    async function loadTexturePlane(url, w=1, h=1){
+      return new Promise((resolve, reject)=>{
+        const loader = new THREE.TextureLoader();
+        loader.load(url, (texture)=>{
+          texture.encoding = THREE.sRGBEncoding;
+          const geo = new THREE.PlaneGeometry(w, h);
+          const mat = new THREE.MeshBasicMaterial({map:texture, transparent:true});
+          const mesh = new THREE.Mesh(geo, mat);
+          resolve(mesh);
+        }, undefined, (err)=>reject(err));
+      });
+    }
+
+    async function initAR(){
+      if(!window.MINDAR || !MINDAR.IMAGE){
+        tagFail('libTag');
+        throw new Error('MindAR UMD not available on window.MINDAR.IMAGE');
+      }
+      // Tracker file presence check
+      try {
+        await fetch('./targets.mind', {method:'HEAD'});
+        addLog('Found targets.mind', 'trackerTag');
+      } catch (e){
+        tagFail('trackerTag','tracker ✗');
+        throw new Error('targets.mind not found at ./targets.mind');
+      }
+
+      mindarThree = new MINDAR.IMAGE.MindARThree({
+        container: document.querySelector("#canvas-container"),
+        imageTargetSrc: "./targets.mind",
+        uiScanning: true,
+        uiLoading: "no",
+        filterMinCF: 0.01,
+        warmupTolerance: 5,
+        maxTrack: 1,
+        capture: true,
+        // @ts-ignore some builds support this; if ignored it's fine
+        deviceId: undefined,
+        // prefer facing mode (MindAR uses cameraConfig internally)
+        // We'll rebuild the pipeline for flip
+      });
+
+      ({renderer, scene, camera} = mindarThree);
+
+      const light = new THREE.HemisphereLight(0xffffff, 0x222222, 1.2);
+      scene.add(light);
+
+      anchor = mindarThree.addAnchor(0); // first target
+
+      // Size planes to match target width in world units (default ~1)
+      const planesToLoad = ["./layers/1.png","./layers/2.png","./layers/3.png","./layers/4.png","./layers/5.png"];
+      for(const p of planesToLoad){
+        try {
+          const mesh = await loadTexturePlane(p, 1, 1);
+          mesh.visible = false;
+          planes.push(mesh);
+          anchor.group.add(mesh);
+          addLog(`Loaded layer: ${p}`);
+        } catch (e) {
+          addLog(`Failed to load ${p}: ${e.message}`);
+        }
+      }
+
+      const clock = new THREE.Clock();
+      const animate = ()=>{
+        const dt = clock.getDelta();
+        renderer.setAnimationLoop(()=>{
+          renderer.render(scene, camera);
+        });
+      };
+      animate();
+
+      anchor.onTargetFound = ()=>log('Target found ✓');
+      anchor.onTargetLost = ()=>log('Target lost');
+
+      addLog('AR scene initialized');
+    }
+
+    async function startAR(){
+      try{
+        if(started){
+          addLog('Restarting AR…');
+          await mindarThree.stop();
+          await mindarThree.switchCamera(); // ensure pipeline resets
+        } else {
+          await initAR();
+        }
+        await mindarThree.start({ facingMode });
+        started = true;
+        addLog(`AR started (facingMode=${facingMode})`);
+        setButtons(true);
+      }catch(err){
+        addLog('Error starting AR: ' + (err && err.message ? err.message : err));
+        console.error(err);
+      }
+    }
+
+    async function flipCamera(){
+      facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+      addLog('Switching camera to ' + facingMode + '…');
+      try {
+        await mindarThree.stop();
+      } catch(e){}
+      await startAR();
+    }
+
+    function showAll(v=true){
+      planes.forEach(p=>p.visible = v);
+      addLog(v ? 'All layers shown' : 'All layers hidden');
+    }
+
+    function setupUI(){
+      document.getElementById('startBtn').addEventListener('click', startAR, {passive:true});
+      document.getElementById('flipBtn').addEventListener('click', flipCamera, {passive:true});
+      document.getElementById('showAllBtn').addEventListener('click', ()=>showAll(true), {passive:true});
+      document.getElementById('hideAllBtn').addEventListener('click', ()=>showAll(false), {passive:true});
+
+      // Visibility pause/resume
+      document.addEventListener('visibilitychange', async ()=>{
+        if(!mindarThree) return;
+        if(document.hidden){
+          try{ await mindarThree.pause(); addLog('Paused (tab hidden)'); }catch(e){}
+        } else {
+          try{ await mindarThree.resume(); addLog('Resumed (tab visible)'); }catch(e){}
+        }
+      });
+    }
+
+    async function selfTest(){
+      const permTag = document.getElementById('permTag');
+      const deviceTag = document.getElementById('deviceTag');
+      try {
+        if(!navigator.mediaDevices){
+          tagFail('permTag','camera ✗');
+          addLog('navigator.mediaDevices missing — must be https/localhost.');
+          return;
+        }
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d=>d.kind==='videoinput');
+        if(cams.length){
+          deviceTag.style.background = '#238636'; deviceTag.textContent = 'devices ✓';
+          addLog('Found ' + cams.length + ' cameras.', 'deviceTag');
+        } else {
+          tagFail('deviceTag','devices ✗'); addLog('No cameras found.');
+        }
+        // Permission probe
+        try{
+          const perm = await navigator.permissions.query({name:'camera'});
+          addLog('Permission state: ' + perm.state, 'permTag');
+        } catch(e){
+          addLog('Permissions API not fully supported: ' + e.message);
+        }
+        // Quick open+close to prompt permission
+        try{
+          const stream = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
+          stream.getTracks().forEach(t=>t.stop());
+          addLog('getUserMedia succeeded.', 'permTag');
+        } catch(e){
+          tagFail('permTag','camera ✗');
+          addLog('getUserMedia failed: ' + e.message);
+        }
+      } catch (e){
+        addLog('Self-test error: ' + e.message);
+      }
+    }
+
+    window.addEventListener('error', (e)=> addLog('Window error: ' + e.message));
+    window.addEventListener('unhandledrejection', (e)=> addLog('Unhandled promise rejection: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+
+    setupUI();
+    document.getElementById('selfTestBtn').addEventListener('click', selfTest);
+
+    // Auto-run a quick libs check after load
+    window.addEventListener('load', ()=>{
+      if(window.THREE && window.MINDAR && window.MINDAR.IMAGE){
+        addLog('Libraries ready ✓', 'libTag');
+      } else {
+        addLog('Libraries not ready yet — will initialize on demand.');
+      }
+    });
+  </script>
+</body>
+</html>
