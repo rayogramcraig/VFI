@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>VFI Model — Image‑Tracked WebAR (Layers)</title>
+  <title>VFI Model — Image‑Tracked WebAR</title>
   <style>
     html, body { margin: 0; padding: 0; height: 100%; background:#000; color:#fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
     #app { position: fixed; inset: 0; overflow: hidden; }
@@ -36,7 +36,7 @@
         <button id="showAll" class="secondary">Show all</button>
         <button id="hideAll" class="secondary">Hide all</button>
       </div>
-      <div class="hint">Point your phone at the engraved corner target on the wooden base.</div>
+      <div class="hint">Point your phone at the engraved corner target on the wooden base. Layers are sized to the model width (150 mm).</div>
       <div id="layerToggles" class="layers"></div>
     </div>
   </div>
@@ -45,38 +45,57 @@
     const TARGETS_FILE = 'targets.mind';
     const MODEL_WIDTH_M = 0.15;
     const LAYERS = [
-      { id: 'Aerial + massing', type: 'image', src: 'layers/1.png', width: MODEL_WIDTH_M },
-      { id: 'Grass + roads', type: 'image', src: 'layers/2.png', width: MODEL_WIDTH_M },
-      { id: 'Linework', type: 'image', src: 'layers/3.png', width: MODEL_WIDTH_M },
-      { id: 'Simplified plan', type: 'image', src: 'layers/4.png', width: MODEL_WIDTH_M },
-      { id: 'Parcel mask', type: 'image', src: 'layers/5.png', width: MODEL_WIDTH_M }
+      { id: 'Aerial + massing',          type: 'image', src: 'layers/1.png', width: MODEL_WIDTH_M },
+      { id: 'Grass + roads (render)',    type: 'image', src: 'layers/2.png', width: MODEL_WIDTH_M },
+      { id: 'Linework (B/W)',            type: 'image', src: 'layers/3.png', width: MODEL_WIDTH_M },
+      { id: 'Simplified color plan',     type: 'image', src: 'layers/4.png', width: MODEL_WIDTH_M },
+      { id: 'Blank parcel mask',         type: 'image', src: 'layers/5.png', width: MODEL_WIDTH_M }
     ];
+
     const appEl = document.getElementById('app');
+    const startBtn = document.getElementById('startBtn');
+    const flipBtn  = document.getElementById('flipBtn');
+    const showAllBtn = document.getElementById('showAll');
+    const hideAllBtn = document.getElementById('hideAll');
+    const layerToggles = document.getElementById('layerToggles');
+    let mindarThree, renderer, scene, camera, anchor, overlayRoot;
+    let currentFacingMode = 'environment';
     const meshes = new Map();
+
     LAYERS.forEach(layer => {
       const wrap = document.createElement('label');
       wrap.className = 'toggle';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
+      cb.checked = false;
       cb.addEventListener('change', () => { const m = meshes.get(layer.id); if (m) m.visible = cb.checked; });
-      wrap.appendChild(cb);
       const span = document.createElement('span');
       span.textContent = layer.id;
-      wrap.appendChild(span);
-      document.getElementById('layerToggles').appendChild(wrap);
+      wrap.appendChild(cb); wrap.appendChild(span);
+      layerToggles.appendChild(wrap);
       layer.__checkbox = cb;
     });
-    document.getElementById('showAll').addEventListener('click', () => {
+
+    showAllBtn.addEventListener('click', () => {
       LAYERS.forEach(l => { l.__checkbox.checked = true; const m = meshes.get(l.id); if (m) m.visible = true; });
     });
-    document.getElementById('hideAll').addEventListener('click', () => {
+    hideAllBtn.addEventListener('click', () => {
       LAYERS.forEach(l => { l.__checkbox.checked = false; const m = meshes.get(l.id); if (m) m.visible = false; });
     });
-    let mindarThree, renderer, scene, camera, anchor, overlayRoot;
+
     async function initAR() {
       await stopAR();
       try {
-        mindarThree = new window.MINDAR.IMAGE.MindARThree({ container: appEl, imageTargetSrc: TARGETS_FILE, maxTrack: 1, facingMode: 'environment' });
+        if (!window.MINDAR || !window.MINDAR.IMAGE) {
+          throw new Error('MindAR library not loaded or IMAGE module missing');
+        }
+        const { MindARThree } = window.MINDAR.IMAGE;
+        mindarThree = new MindARThree({
+          container: appEl,
+          imageTargetSrc: TARGETS_FILE,
+          maxTrack: 1,
+          facingMode: currentFacingMode
+        });
         ({renderer, scene, camera} = mindarThree);
         scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
         anchor = mindarThree.addAnchor(0);
@@ -90,28 +109,29 @@
         }
         await mindarThree.start();
         document.getElementById('panel').classList.add('hidden');
-        renderer.setAnimationLoop(() => { renderer.render(scene, camera); });
+        renderer.setAnimationLoop(() => renderer.render(scene, camera));
       } catch (err) {
-        alert('Error starting AR: ' + err);
+        alert('Error starting AR: ' + err.message);
         console.error(err);
       }
     }
+
     async function buildImageMesh(src, widthM) {
       const img = document.getElementById('_preImg');
-      img.src = src;
-      await img.decode().catch(()=>{});
-      const tex = new THREE.Texture(img);
-      tex.needsUpdate = true;
+      img.src = src; await img.decode().catch(()=>{});
+      const tex = new THREE.Texture(img); tex.needsUpdate = true;
       const aspect = (img.naturalWidth && img.naturalHeight) ? img.naturalWidth / img.naturalHeight : 1;
       const geom = new THREE.PlaneGeometry(widthM, widthM / aspect);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
+      const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
       return new THREE.Mesh(geom, mat);
     }
+
     async function stopAR() {
       try { if (mindarThree) { await mindarThree.stop(); mindarThree.renderer.setAnimationLoop(null); while (appEl.firstChild) appEl.removeChild(appEl.firstChild); mindarThree = null; } } catch (e) { console.warn(e); }
     }
-    document.getElementById('startBtn').addEventListener('click', initAR);
-    document.getElementById('flipBtn').addEventListener('click', async () => { await stopAR(); mindarThree = null; initAR(); });
+
+    startBtn.addEventListener('click', initAR);
+    flipBtn.addEventListener('click', async () => { currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment'; await initAR(); });
   </script>
 </body>
 </html>
