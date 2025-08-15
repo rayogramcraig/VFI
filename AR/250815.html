@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>VFI AR — Final (Dual Canvas + Tracked)</title>
+
+<!-- Three r132 + MindAR v1.1.5 -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image-three.prod.js"></script>
+
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #stage{position:fixed;inset:0}
+
+  /* Bottom: camera feed via DOM <video> */
+  #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:0}
+
+  /* Middle: MindAR canvas (transparent) for tracking only */
+  #ar{position:absolute;inset:0;z-index:1;pointer-events:none}
+  #ar canvas{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:transparent!important}
+  #ar video{display:none!important} /* hide MindAR's internal video */
+
+  /* Top: our overlay renderer canvas (always above) */
+  #overlayWrap{position:absolute;inset:0;z-index:2;pointer-events:none}
+  #overlayWrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;background:transparent}
+
+  /* HUD */
+  #hud{position:absolute;left:.75rem;right:.75rem;bottom:env(safe-area-inset-bottom,0);z-index:5;display:flex;gap:.6rem;flex-wrap:wrap}
+  .panel{backdrop-filter:blur(6px);background:rgba(20,20,20,.65);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:10px}
+  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .btn{appearance:none;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;padding:.5rem .8rem;border-radius:12px;cursor:pointer;font-weight:600}
+  .primary{background:#2b8cff}
+  label.toggle{display:inline-flex;align-items:center;gap:.4rem}
+  #status{position:absolute;top:env(safe-area-inset-top,0);left:0;right:0;display:flex;justify-content:center;z-index:6;padding-top:.5rem}
+  #status .pill{background:rgba(20,20,20,.7);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:.4rem .8rem;font-size:13px}
+  #start{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 500px at 50% 0%,#121212,#050505);z-index:7}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="ar"></div>
+  <div id="overlayWrap"></div>
+
+  <div id="status"><div class="pill" id="statusText">Ready</div></div>
+
+  <div id="hud">
+    <div class="panel">
+      <div class="row">
+        <button id="startBtn" class="btn primary">Start</button>
+        <button id="clearBtn" class="btn">Clear</button>
+        <label class="toggle"><input id="forceShow" type="checkbox"/> Force show</label>
+      </div>
+      <div class="row" style="margin-top:.3rem">
+        <span>Overlay:</span>
+        <button data-ov="1" class="btn">1</button>
+        <button data-ov="2" class="btn">2</button>
+        <button data-ov="3" class="btn">3</button>
+        <button data-ov="4" class="btn">4</button>
+        <button data-ov="5" class="btn">5</button>
+      </div>
+      <div class="row" style="margin-top:.3rem">
+        <span>Opacity</span><input id="opacity" type="range" min="0" max="1" step="0.01" value="1"/>
+        <span>Scale</span><input id="scale" type="range" min="0.5" max="3" step="0.01" value="1"/>
+      </div>
+    </div>
+  </div>
+
+  <div id="start"><div class="panel"><h3>VFI AR</h3><button id="go" class="btn primary">Start</button></div></div>
+</div>
+
+<script>
+(() => {
+  // --- your assets ---
+  const TARGET = "v2/targets.mind";
+  const OVERLAYS = ["v2/layers/1.png","v2/layers/2.png","v2/layers/3.png","v2/layers/4.png","v2/layers/5.png"];
+  const MAX_ANCHORS = 5; // try 0..4
+
+  // --- elements ---
+  const arEl = document.getElementById("ar");
+  const overlayWrap = document.getElementById("overlayWrap");
+  const videoEl = document.getElementById("video");
+  const statusText = document.getElementById("statusText");
+  const startScreen = document.getElementById("start");
+  const startBtn = document.getElementById("startBtn");
+  const goBtn = document.getElementById("go");
+  const clearBtn = document.getElementById("clearBtn");
+  const forceShow = document.getElementById("forceShow");
+  const opacity = document.getElementById("opacity");
+  const scale = document.getElementById("scale");
+  const ovBtns = [...document.querySelectorAll("[data-ov]")];
+
+  // --- MindAR ---
+  let mindarThree, arRenderer, arScene, arCamera, anchors = [];
+  let activeAnchor = null;       // currently found anchor
+
+  // --- Top overlay renderer ---
+  let ovRenderer, ovScene, ovCamera, overlayRoot, overlayMesh=null, cameraQuad=null;
+
+  // --- UI state ---
+  const state = { opacity: 1, scale: 1 };
+
+  const setStatus = (s)=>{ statusText.textContent = s; console.log("[status]", s); };
+
+  // Create top transparent renderer/scene that we control
+  function initTopRenderer(){
+    ovRenderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+    ovRenderer.setPixelRatio(window.devicePixelRatio);
+    ovRenderer.setSize(overlayWrap.clientWidth, overlayWrap.clientHeight);
+    ovRenderer.setClearColor(0x000000, 0);
+    overlayWrap.appendChild(ovRenderer.domElement);
+
+    ovScene = new THREE.Scene();
+    // IMPORTANT: reuse MindAR camera for correct projection
+    ovCamera = arCamera;
+
+    // Root that will copy the anchor world matrix each frame
+    overlayRoot = new THREE.Object3D();
+    overlayRoot.matrixAutoUpdate = false;
+    ovScene.add(overlayRoot);
+
+    window.addEventListener("resize", () => {
+      const w = overlayWrap.clientWidth, h = overlayWrap.clientHeight;
+      ovRenderer.setSize(w, h);
+    });
+  }
+
+  function killMesh(m){
+    if(!m) return;
+    m.parent && m.parent.remove(m);
+    m.geometry && m.geometry.dispose();
+    if (m.material){
+      m.material.map && m.material.map.dispose && m.material.map.dispose();
+      m.material.dispose();
+    }
+  }
+
+  function clearOverlays(){
+    killMesh(overlayMesh); overlayMesh=null;
+    killMesh(cameraQuad);  cameraQuad=null;
+  }
+
+  async function setTrackedOverlay(src){
+    clearOverlays();
+    const loader = new THREE.TextureLoader();
+    loader.load(src, (tex)=>{
+      // plane sized to MindAR's target coordinate (1 unit = target width)
+      const aspect = tex.image.width / tex.image.height;
+      const geom = new THREE.PlaneGeometry(1.0 * state.scale, (1.0/aspect) * state.scale);
+      const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent:true, opacity: state.opacity, side: THREE.DoubleSide });
+      overlayMesh = new THREE.Mesh(geom, mat);
+      overlayRoot.add(overlayMesh);
+      setStatus("Overlay ready (tracked): "+src);
+    }, undefined, (err)=>{ setStatus("Overlay load FAILED: "+src); console.error(err); });
+  }
+
+  async function setCameraOverlay(src){
+    clearOverlays();
+    const loader = new THREE.TextureLoader();
+    loader.load(src, (tex)=>{
+      const aspect = tex.image.width / tex.image.height;
+      const geom = new THREE.PlaneGeometry(1.4 * state.scale, (1.4/aspect) * state.scale);
+      const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent:true, opacity: state.opacity, side: THREE.DoubleSide, depthTest:false, depthWrite:false });
+      cameraQuad = new THREE.Mesh(geom, mat);
+      ovScene.add(cameraQuad);
+      setStatus("Overlay ready (camera): "+src);
+    }, undefined, (err)=>{ setStatus("Overlay load FAILED: "+src); console.error(err); });
+  }
+
+  function applyOpacityScale(){
+    state.opacity = parseFloat(opacity.value);
+    state.scale   = parseFloat(scale.value);
+    if (overlayMesh) { overlayMesh.material.opacity = state.opacity; }
+    if (cameraQuad)  { cameraQuad.material.opacity  = state.opacity; }
+  }
+
+  async function mirrorVideoFromMindAR(){
+    const mv = mindarThree.video;
+    try{
+      if (mv?.srcObject) videoEl.srcObject = mv.srcObject;
+      else if (mv?.src)  videoEl.src = mv.src;
+      videoEl.muted = true; videoEl.playsInline = true;
+      await videoEl.play().catch(()=>{});
+    }catch(e){ console.error("mirrorVideo", e); }
+  }
+
+  async function init(){
+    // MindAR setup (transparent canvas)
+    mindarThree = new window.MINDAR.IMAGE.MindARThree({
+      container: arEl,
+      imageTargetSrc: TARGET,
+      uiLoading:"no", uiScanning:"no", uiError:"no",
+      warmupTolerance:5, filterMinCF:0.0001
+    });
+    ({renderer: arRenderer, scene: arScene, camera: arCamera} = mindarThree);
+
+    // Anchors 0..MAX_ANCHORS-1
+    for(let i=0;i<MAX_ANCHORS;i++){
+      const a = mindarThree.addAnchor(i);
+      a.onTargetFound = ()=>{ activeAnchor = a; setStatus(`Found target #${i}`); };
+      a.onTargetLost  = ()=>{ if (activeAnchor === a) { activeAnchor = null; setStatus("Searching for target…"); } };
+      anchors.push(a);
+    }
+
+    await mindarThree.start();
+    await mirrorVideoFromMindAR();
+
+    // Top renderer uses the SAME camera for perfect alignment
+    initTopRenderer();
+
+    // MindAR render loop (bottom canvas)
+    arRenderer.setAnimationLoop(()=>{ arRenderer.render(arScene, arCamera); });
+
+    // Our overlay render loop (top canvas)
+    (function loop(){
+      // Update overlay root pose from the active anchor
+      if (activeAnchor && overlayRoot) {
+        // copy anchor world matrix so our overlay tracks the target
+        overlayRoot.matrix.copy(activeAnchor.group.matrixWorld);
+        overlayRoot.matrixWorldNeedsUpdate = true;
+        overlayRoot.visible = !forceShow.checked; // hide when forcing camera overlay
+      } else if (overlayRoot) {
+        overlayRoot.visible = false;
+      }
+
+      // If Force show, pin overlay in front of camera (centered)
+      if (cameraQuad) {
+        const dir = new THREE.Vector3();
+        arCamera.getWorldDirection(dir);
+        const pos = new THREE.Vector3().copy(arCamera.position).add(dir.multiplyScalar(1.2));
+        cameraQuad.position.copy(pos);
+        cameraQuad.quaternion.copy(arCamera.quaternion);
+        cameraQuad.rotateY(Math.PI);
+      }
+
+      ovRenderer.render(ovScene, ovCamera);
+      requestAnimationFrame(loop);
+    })();
+
+    setStatus("Point camera at the model");
+  }
+
+  function start(){ startScreen.style.display="none"; init().catch(e=>{ console.error(e); setStatus("Init failed"); startScreen.style.display="grid"; }); }
+
+  // UI wiring
+  startBtn.onclick = start; goBtn.onclick = start;
+  clearBtn.onclick = ()=>{ clearOverlays(); };
+  opacity.oninput = applyOpacityScale; scale.oninput = applyOpacityScale;
+
+  ovBtns.forEach(b => b.onclick = () => {
+    const src = OVERLAYS[parseInt(b.dataset.ov,10)-1];
+    if (forceShow.checked) setCameraOverlay(src); else setTrackedOverlay(src);
+  });
+})();
+</script>
+</body>
+</html>
