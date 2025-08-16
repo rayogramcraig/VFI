@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>VFI AR — All-in-One (Stable + Calibrated + No Flips)</title>
+
+<!-- Three r132 + MindAR v1.1.5 -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image-three.prod.js"></script>
+
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #stage{position:fixed;inset:0}
+
+  /* Bottom: camera feed */
+  #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:0}
+
+  /* Middle: MindAR (transparent; tracking only) */
+  #ar{position:absolute;inset:0;z-index:1;pointer-events:none}
+  #ar canvas{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:transparent!important}
+  #ar video{display:none!important}
+
+  /* Top: our overlay canvas */
+  #overlayWrap{position:absolute;inset:0;z-index:2;pointer-events:none}
+  #overlayWrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;background:transparent}
+
+  /* HUD */
+  #hud{position:absolute;left:.75rem;right:.75rem;bottom:env(safe-area-inset-bottom,0);z-index:5;display:flex;gap:.6rem;flex-wrap:wrap}
+  .panel{backdrop-filter:blur(6px);background:rgba(20,20,20,.65);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:10px}
+  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .btn{appearance:none;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;padding:.45rem .7rem;border-radius:10px;cursor:pointer;font-weight:600}
+  .primary{background:#2b8cff}
+  label.toggle{display:inline-flex;align-items:center;gap:.4rem}
+  select, input[type=range]{accent-color:#2b8cff}
+
+  #status{position:absolute;top:env(safe-area-inset-top,0);left:0;right:0;display:flex;justify-content:center;z-index:6;padding-top:.5rem}
+  #status .pill{background:rgba(20,20,20,.7);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:.35rem .8rem;font-size:13px}
+
+  #start{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(1200px 500px at 50% 0%,#121212,#050505);z-index:7}
+
+  .group{display:flex;gap:.35rem;align-items:center}
+  .muted{opacity:.75}
+</style>
+</head>
+<body tabindex="0">
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="ar"></div>
+  <div id="overlayWrap"></div>
+
+  <div id="status"><div class="pill" id="statusText">Ready</div></div>
+
+  <div id="hud">
+    <div class="panel">
+      <div class="row">
+        <button id="startBtn" class="btn primary">Start 250816</button>
+        <button id="clearBtn" class="btn">Clear</button>
+        <label class="toggle"><input id="forceShow" type="checkbox" checked/> Force show</label>
+        <label class="toggle">Stability
+          <select id="stability">
+            <option value="low">Low</option>
+            <option value="med" selected>Med</option>
+            <option value="high">High</option>
+            <option value="max">Max</option>
+          </select>
+        </label>
+        <label class="toggle"><input id="autoLock" type="checkbox" checked/> Auto-lock</label>
+        <button id="unlockBtn" class="btn">Unlock</button>
+      </div>
+
+      <div class="row" style="margin-top:.35rem">
+        <span>Overlay:</span>
+        <button data-ov="1" class="btn">1</button>
+        <button data-ov="2" class="btn">2</button>
+        <button data-ov="3" class="btn">3</button>
+        <button data-ov="4" class="btn">4</button>
+        <button data-ov="5" class="btn">5</button>
+        <span class="muted">(H = flip horizontal, V = flip vertical)</span>
+      </div>
+
+      <div class="row" style="margin-top:.35rem">
+        <span>Opacity</span><input id="opacity" type="range" min="0" max="1" step="0.01" value="1"/>
+        <span>Fit</span><input id="fit" type="range" min="0.1" max="2.0" step="0.01" value="0.35"/>
+      </div>
+
+      <div class="row" style="margin-top:.35rem;flex-wrap:wrap">
+        <div class="group">
+          <strong>Rotate</strong>
+          <button class="btn" data-rot="x:-5">X-</button>
+          <button class="btn" data-rot="x:+5">X+</button>
+          <button class="btn" data-rot="y:-5">Y-</button>
+          <button class="btn" data-rot="y:+5">Y+</button>
+          <button class="btn" data-rot="z:-5">Z-</button>
+          <button class="btn" data-rot="z:+5">Z+</button>
+          <button id="resetOri" class="btn">Reset</button>
+        </div>
+        <div class="group">
+          <button id="calibrateBtn" class="btn primary">Calibrate</button>
+          <span id="calibMsg" class="muted"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="start"><div class="panel"><h3>VFI AR</h3><button id="go" class="btn primary">Start</button></div></div>
+</div>
+
+<script>
+(() => {
+  // ---------- assets ----------
+  const TARGET = "v2/targets.mind";
+  const OVERLAYS = ["v2/layers/1.png","v2/layers/2.png","v2/layers/3.png","v2/layers/4.png","v2/layers/5.png"];
+  const MAX_ANCHORS = 5;
+
+  // ---------- elements ----------
+  const arEl = document.getElementById("ar");
+  const overlayWrap = document.getElementById("overlayWrap");
+  const videoEl = document.getElementById("video");
+  const statusText = document.getElementById("statusText");
+  const startScreen = document.getElementById("start");
+  const startBtn = document.getElementById("startBtn");
+  const goBtn = document.getElementById("go");
+  const clearBtn = document.getElementById("clearBtn");
+  const forceShow = document.getElementById("forceShow");
+  const stabilitySel = document.getElementById("stability");
+  const autoLock = document.getElementById("autoLock");
+  const unlockBtn = document.getElementById("unlockBtn");
+  const opacity = document.getElementById("opacity");
+  const fit = document.getElementById("fit");
+  const rotBtns = [...document.querySelectorAll("[data-rot]")];
+  const resetOriBtn = document.getElementById("resetOri");
+  const ovBtns = [...document.querySelectorAll("[data-ov]")];
+  const calibrateBtn = document.getElementById("calibrateBtn");
+  const calibMsg = document.getElementById("calibMsg");
+
+  // ---------- MindAR ----------
+  let mindarThree, arRenderer, arScene, arCamera;
+  let anchors = [], activeAnchor = null;
+
+  // ---------- top overlay renderer ----------
+  let ovRenderer, ovScene, ovCamera;
+  // scene graph: overlayRoot -> correction(no default flip) -> adjust(user offsets) -> overlayMesh
+  let overlayRoot, correction, adjust, overlayMesh=null, cameraQuad=null;
+
+  // ---------- smoothing & stability ----------
+  const POSE_BUF_N = 7; const poses = [];
+  let CFG = { filterMinCF:0.005, filterBeta:0.015, missTolerance:6, smoothPos:0.18, smoothRot:0.22, smoothScl:0.22, graceFrames:10, stableFramesNeeded:18,
+              maxStepPos:0.08, maxStepDeg:14, maxStepScl:0.10 };
+  const ema = { pos:new THREE.Vector3(), quat:new THREE.Quaternion(), scl:new THREE.Vector3(1,1,1), initialized:false };
+  let missed=0, locked=false, stableCount=0;
+
+  function profile(kind){
+    if (kind==="low")  return {filterMinCF:0.003, filterBeta:0.008, missTolerance:4, smoothPos:0.12, smoothRot:0.16, smoothScl:0.16, graceFrames:6,  stableFramesNeeded:12, maxStepPos:0.10, maxStepDeg:18, maxStepScl:0.12};
+    if (kind==="med")  return {filterMinCF:0.005, filterBeta:0.015, missTolerance:6, smoothPos:0.18, smoothRot:0.22, smoothScl:0.22, graceFrames:10, stableFramesNeeded:18, maxStepPos:0.08, maxStepDeg:14, maxStepScl:0.10};
+    if (kind==="high") return {filterMinCF:0.008, filterBeta:0.028, missTolerance:8, smoothPos:0.24, smoothRot:0.28, smoothScl:0.28, graceFrames:14, stableFramesNeeded:24, maxStepPos:0.06, maxStepDeg:10, maxStepScl:0.08};
+    if (kind==="max")  return {filterMinCF:0.012, filterBeta:0.045, missTolerance:10,smoothPos:0.30, smoothRot:0.36, smoothScl:0.36, graceFrames:18, stableFramesNeeded:32, maxStepPos:0.04, maxStepDeg:7,  maxStepScl:0.06};
+  }
+  function setProfile(kind){ CFG = profile(kind); setStatus(`Stability: ${kind.toUpperCase()}`); }
+
+  // ---------- calibration offsets ----------
+  const offsets = {
+    scale: parseFloat(fit.value),         // overall scale vs. MindAR target width = 1
+    rot: new THREE.Euler(0,0,0,"XYZ")     // additional rotation after correction
+  };
+
+  // ---------- helpers ----------
+  const setStatus = (s)=>{ statusText.textContent = s; console.log("[status]", s); };
+
+  function killMesh(m){
+    if(!m) return;
+    m.parent && m.parent.remove(m);
+    m.geometry && m.geometry.dispose();
+    if (m.material){ m.material.map?.dispose?.(); m.material.dispose(); }
+  }
+  function clearOverlays(){ killMesh(overlayMesh); overlayMesh=null; killMesh(cameraQuad); cameraQuad=null; }
+
+  function applyOpacity(){ const v=parseFloat(opacity.value); if (overlayMesh) overlayMesh.material.opacity=v; if (cameraQuad) cameraQuad.material.opacity=v; }
+  function applyFit(){ offsets.scale = parseFloat(fit.value); if (overlayMesh) overlayMesh.scale.setScalar(offsets.scale); if (cameraQuad) cameraQuad.scale.setScalar(offsets.scale); }
+  function rotateOffsets(axis, deg){ const r=THREE.MathUtils.degToRad(deg); offsets.rot[axis]+=r; adjust.rotation.copy(offsets.rot); }
+  function resetOrientation(){ offsets.rot.set(0,0,0); adjust.rotation.set(0,0,0); }
+
+  function poseFromMatrix(m){ const p=new THREE.Vector3(), q=new THREE.Quaternion(), s=new THREE.Vector3(); m.decompose(p,q,s); return {pos:p, quat:q, scl:s}; }
+  function addPose(m){ poses.push(poseFromMatrix(m)); if (poses.length>POSE_BUF_N) poses.shift(); }
+
+  function medianPose(){
+    const xs=poses.map(b=>b.pos.x).sort((a,b)=>a-b), ys=poses.map(b=>b.pos.y).sort((a,b)=>a-b), zs=poses.map(b=>b.pos.z).sort((a,b)=>a-b);
+    const sxs=poses.map(b=>b.scl.x).sort((a,b)=>a-b), sys=poses.map(b=>b.scl.y).sort((a,b)=>a-b), szs=poses.map(b=>b.scl.z).sort((a,b)=>a-b);
+    const mid=Math.floor(poses.length/2);
+    const pos=new THREE.Vector3(xs[mid],ys[mid],zs[mid]), scl=new THREE.Vector3(sxs[mid],sys[mid],szs[mid]);
+    let q=poses[0].quat.clone(); for(let i=1;i<poses.length;i++){ const qi=poses[i].quat.clone(); if (q.dot(qi)<0) qi.multiplyScalar(-1); q.slerp(qi,1/(i+1)); } q.normalize();
+    return {pos,quat:q,scl};
+  }
+
+  function clampPoseStep(prev, next){
+    const out = {pos: next.pos.clone(), quat: next.quat.clone(), scl: next.scl.clone()};
+    // position
+    const dp = out.pos.clone().sub(prev.pos); const dplen = dp.length();
+    if (dplen > CFG.maxStepPos){ dp.setLength(CFG.maxStepPos); out.pos.copy(prev.pos.clone().add(dp)); }
+    // rotation
+    const dq = prev.quat.clone().invert().multiply(out.quat);
+    const angle = 2*Math.acos(Math.max(-1,Math.min(1,dq.w))) * 180/Math.PI;
+    if (angle > CFG.maxStepDeg){ const t = CFG.maxStepDeg/angle; out.quat.copy(prev.quat.clone().slerp(out.quat, t)); }
+    // scale
+    ["x","y","z"].forEach(k=>{
+      const delta = out.scl[k] - prev.scl[k];
+      const mx = CFG.maxStepScl;
+      if (Math.abs(delta) > mx) out.scl[k] = prev.scl[k] + Math.sign(delta)*mx;
+    });
+    return out;
+  }
+
+  function smoothTo(target){
+    if(!ema.initialized){ ema.pos.copy(target.pos); ema.quat.copy(target.quat); ema.scl.copy(target.scl); ema.initialized=true; return; }
+    ema.pos.lerp(target.pos, CFG.smoothPos);
+    THREE.Quaternion.slerp(ema.quat, target.quat, ema.quat, CFG.smoothRot);
+    ema.scl.lerp(target.scl, CFG.smoothScl);
+  }
+
+  // ---------- top renderer ----------
+  function initTopRenderer(){
+    ovRenderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+    ovRenderer.setPixelRatio(window.devicePixelRatio);
+    ovRenderer.setSize(overlayWrap.clientWidth, overlayWrap.clientHeight);
+    ovRenderer.setClearColor(0x000000, 0);
+    overlayWrap.appendChild(ovRenderer.domElement);
+
+    ovScene = new THREE.Scene();
+    ovCamera = arCamera; // share projection
+
+    overlayRoot = new THREE.Object3D(); overlayRoot.matrixAutoUpdate=false; ovScene.add(overlayRoot);
+    correction  = new THREE.Object3D(); overlayRoot.add(correction); // NOTE: no default flip now
+    adjust      = new THREE.Object3D(); correction.add(adjust); adjust.rotation.copy(offsets.rot);
+
+    window.addEventListener("resize", ()=>{ ovRenderer.setSize(overlayWrap.clientWidth, overlayWrap.clientHeight); });
+  }
+
+  // ---------- overlays ----------
+  function setTrackedOverlay(src){
+    clearOverlays();
+    new THREE.TextureLoader().load(src, (tex)=>{
+      const aspect = tex.image.width/tex.image.height;
+      const geom = new THREE.PlaneGeometry(1.0, 1.0/aspect); // MindAR target width = 1
+      const mat  = new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity: parseFloat(opacity.value), side:THREE.DoubleSide });
+      overlayMesh = new THREE.Mesh(geom, mat);
+      overlayMesh.scale.setScalar(offsets.scale);
+      adjust.add(overlayMesh);
+      setStatus("Overlay (tracked) ready");
+    }, undefined, (err)=>{ console.error(err); setStatus("Overlay load FAILED"); });
+  }
+  function setCameraOverlay(src){
+    clearOverlays();
+    new THREE.TextureLoader().load(src, (tex)=>{
+      const aspect = tex.image.width/tex.image.height;
+      const geom = new THREE.PlaneGeometry(1.0, 1.0/aspect);
+      const mat  = new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity: parseFloat(opacity.value), side:THREE.DoubleSide, depthTest:false, depthWrite:false });
+      cameraQuad = new THREE.Mesh(geom, mat);
+      cameraQuad.scale.setScalar(offsets.scale);
+      ovScene.add(cameraQuad);
+      setStatus("Overlay (camera) ready");
+    }, undefined, (err)=>{ console.error(err); setStatus("Overlay load FAILED"); });
+  }
+
+  // ---------- video ----------
+  async function mirrorVideoFromMindAR(){
+    const mv = mindarThree.video;
+    try{
+      if (mv?.srcObject) videoEl.srcObject = mv.srcObject; else if (mv?.src) videoEl.src = mv.src;
+      videoEl.muted=true; videoEl.playsInline=true; await videoEl.play().catch(()=>{});
+    }catch(e){ console.error(e); }
+  }
+
+  // ---------- tracking update ----------
+  function updateOverlayRoot(){
+    if (locked){ overlayRoot.visible = !forceShow.checked; return; }
+
+    if (activeAnchor){
+      missed=0;
+      addPose(activeAnchor.group.matrixWorld);
+      if (poses.length){
+        const med = medianPose();
+        const clamped = clampPoseStep({pos:ema.pos, quat:ema.quat, scl:ema.scl}, med);
+        smoothTo(clamped);
+        overlayRoot.matrix.compose(ema.pos, ema.quat, ema.scl);
+        overlayRoot.matrixWorldNeedsUpdate = true;
+        overlayRoot.visible = !forceShow.checked;
+
+        // count "stable" frames (small deltas) for auto-lock
+        const dp = med.pos.clone().sub(ema.pos).length();
+        const dq = ema.quat.clone().invert().multiply(med.quat);
+        const dang = 2*Math.acos(Math.max(-1,Math.min(1,dq.w))) * 180/Math.PI;
+        if (dp < 0.01 && dang < 5) stableCount++; else stableCount=0;
+        if (autoLock.checked && stableCount > CFG.stableFramesNeeded){ locked = true; setStatus("Locked"); }
+      }
+    } else {
+      if (missed < CFG.missTolerance + CFG.graceFrames){ missed++; overlayRoot.visible = !forceShow.checked; }
+      else { overlayRoot.visible = false; }
+    }
+  }
+
+  // ---------- init ----------
+  async function init(){
+    setProfile(stabilitySel.value);
+
+    mindarThree = new window.MINDAR.IMAGE.MindARThree({
+      container: arEl,
+      imageTargetSrc: TARGET,
+      uiLoading:"no", uiScanning:"no", uiError:"no",
+      filterMinCF: CFG.filterMinCF, filterBeta: CFG.filterBeta, warmupTolerance: 5, missTolerance: CFG.missTolerance
+    });
+    ({renderer: arRenderer, scene: arScene, camera: arCamera} = mindarThree);
+
+    for(let i=0;i<MAX_ANCHORS;i++){
+      const a = mindarThree.addAnchor(i);
+      a.onTargetFound = ()=>{ activeAnchor=a; locked=false; stableCount=0; setStatus(`Found target #${i}`); };
+      a.onTargetLost  = ()=>{ if (activeAnchor===a) activeAnchor=null; if (!locked) setStatus("Searching for target…"); };
+      anchors.push(a);
+    }
+
+    await mindarThree.start();
+    await mirrorVideoFromMindAR();
+
+    initTopRenderer();
+    arRenderer.setAnimationLoop(()=>{ arRenderer.render(arScene, arCamera); });
+
+    // Top render loop
+    (function loop(){
+      updateOverlayRoot();
+
+      // Force-show overlay follows camera; NOTE: no extra 180° Y flip anymore
+      if (cameraQuad && forceShow.checked){
+        const dir = new THREE.Vector3(); arCamera.getWorldDirection(dir);
+        const pos = new THREE.Vector3().copy(arCamera.position).add(dir.multiplyScalar(1.2));
+        cameraQuad.position.copy(pos);
+        cameraQuad.quaternion.copy(arCamera.quaternion);
+        // apply user orientation so preview matches tracked
+        cameraQuad.rotation.setFromQuaternion(cameraQuad.quaternion);
+        cameraQuad.rotateX(offsets.rot.x);
+        cameraQuad.rotateY(offsets.rot.y);
+        cameraQuad.rotateZ(offsets.rot.z);
+        cameraQuad.visible = true;
+      } else if (cameraQuad){ cameraQuad.visible = false; }
+
+      ovRenderer.render(ovScene, arCamera);
+      requestAnimationFrame(loop);
+    })();
+
+    setStatus("Pick overlay → fit/rotate → Calibrate. (Force show is ON to preview.)");
+    setTimeout(()=>document.body.focus(), 0);
+
+    // Auto-load Overlay 1 in Force-show so something appears right away
+    setTimeout(()=>{ setCameraOverlay(OVERLAYS[0]); }, 50);
+  }
+
+  function start(){
+    startScreen.style.display="none";
+    init().catch(e=>{ console.error(e); setStatus("Init failed"); startScreen.style.display="grid"; });
+  }
+
+  // ---------- UI wiring ----------
+  startBtn.onclick = start; goBtn.onclick = start;
+  clearBtn.onclick = ()=>{ clearOverlays(); };
+  stabilitySel.onchange = ()=> setProfile(stabilitySel.value);
+
+  opacity.oninput = applyOpacity;
+  fit.oninput = applyFit;
+
+  rotBtns.forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const [axis,delta] = b.dataset.rot.split(":");
+      rotateOffsets(axis, parseFloat(delta));
+    });
+  });
+  resetOriBtn.onclick = resetOrientation;
+
+  ovBtns.forEach(b => b.onclick = () => {
+    const src = OVERLAYS[parseInt(b.dataset.ov,10)-1];
+    if (forceShow.checked) setCameraOverlay(src); else setTrackedOverlay(src);
+  });
+
+  calibrateBtn.onclick = ()=>{
+    // offsets already applied live; show confirmation only
+    calibMsg.textContent = `Saved: fit ${offsets.scale.toFixed(2)}, rot [${(offsets.rot.x*57.2958|0)}°, ${(offsets.rot.y*57.2958|0)}°, ${(offsets.rot.z*57.2958|0)}°]`;
+    setTimeout(()=>calibMsg.textContent="", 2200);
+  };
+
+  unlockBtn.onclick = ()=>{ locked=false; stableCount=0; setStatus("Unlocked"); };
+
+  // ---------- Hotkeys ----------
+  window.addEventListener("keydown", (e)=>{
+    const k = e.key.toLowerCase();
+    if (k === "h"){ // flip horizontal (mirror X)
+      if (overlayMesh) overlayMesh.scale.x *= -1;
+      if (cameraQuad)  cameraQuad.scale.x  *= -1;
+    }
+    if (k === "v"){ // flip vertical (mirror Y)
+      if (overlayMesh) overlayMesh.scale.y *= -1;
+      if (cameraQuad)  cameraQuad.scale.y  *= -1;
+    }
+    // quick rotate by keyboard (optional: Shift = ±45°)
+    if (["x","y","z"].includes(k)){
+      const step = e.shiftKey ? 45 : 5;
+      rotateOffsets(k, step);
+      e.preventDefault();
+    }
+  }, {passive:false});
+})();
+</script>
+</body>
+</html>
+
