@@ -16,7 +16,6 @@
       font-family: "coolvetica", sans-serif;
     }
     section {
-      min-height: 70vh;
       position: relative;
       width: 100%;
     }
@@ -44,7 +43,7 @@
       position: relative;
       padding: 1rem 1rem 0 2rem;
       font-weight: 400;
-	  letter-spacing: -.2rem;
+      letter-spacing: -.2rem;
     }
     .buildings-inside {
       position: relative;
@@ -74,23 +73,56 @@
       width: 70%;
       margin-bottom: 0rem;
     }
+    #donate {
+      background-color: #05385cbf;
+      color: white;
+      padding: 3rem 2rem;
+      border-radius: 2rem;
+      margin: 3rem auto;
+      width: 70%;
+      font-size: 1.5rem;
+      line-height: 1.6;
+      display: flex;
+      justify-content: center;
+    }
+    .donate-box {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+      max-width: 1000px;
+    }
+    .donate-column {
+      flex: 1;
+      min-width: 280px;
+    }
+    .donate-link {
+      font-weight: bold;
+      color: #fffd75;
+      text-decoration: underline;
+	  background-color: #00000050;
+	  margin-left:0px;
+	  padding: 2px 16px 5px 16px;
+	  border-radius: 9px;
+	  white-space: nowrap;
+	  } 
+    }
     #signup {
       min-height: 60vh;
       display: flex;
       align-items: center;
     }
-	.signup-form {
-        box-sizing: border-box;
-	    margin: 0 auto;
-	    background: rgb(162 0 0 / 100%);
-	    padding: 2rem 2rem 2rem 2rem;
-	    border-radius: 3rem;
-	    font-size: 2rem;
-	    z-index: 2;
-	    opacity: .5;
-	    height: fit-content;
-	    color: #ffffff;
-        justify-items: left;
+    .signup-form {
+      box-sizing: border-box;
+      margin: 0 auto;
+      background: rgb(162 0 0 / 100%);
+      padding: 2rem 2rem 2rem 2rem;
+      border-radius: 3rem;
+      font-size: 2rem;
+      z-index: 2;
+      opacity: .5;
+      height: fit-content;
+      color: #ffffff;
+      justify-items: left;
     }
     .signup-form input {
       padding: 0.5rem;
@@ -146,10 +178,8 @@
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-
   gtag('config', 'G-2YL5JFVXTW');
 </script>
-  
   
 <body>
   <section id="hero">
@@ -166,14 +196,34 @@
       </div>
     </div>
   </section>
+
+  <!-- Donate Section -->
+  <section id="donate">
+    <div class="donate-box">
+      <div class="donate-column left">
+        <p style="font-weight:500; letter-spacing: 0.05rem; font-size:2rem; line-height:1.2;">
+          The Village Farm Initiative is dedicated to creating a healthier, more connected community 
+          through land stewardship, education, and collaboration.
+        </p>
+      </div>
+      <div class="donate-column right">
+        <p style="font-weight:300; letter-spacing: 0.05rem; line-height:1.9;">
+          When you contribute, you’re helping us carry forward our mission and ensuring this work 
+          continues to grow and thrive. Your generosity makes all the difference. 
+          <a href="https://buy.stripe.com/bJe3co0ce7zk6us2EZfYY00" class="donate-link"> Donate Now</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
   <section id="signup">
-    <div id="mc_embed_shell" class="signup-form">
+    <div id="mc_embed_shell" class="signup-form" style="width:60%;">
       <link href="//cdn-images.mailchimp.com/embedcode/classic-061523.css" rel="stylesheet" type="text/css">
       <style type="text/css"></style>
       <div id="mc_embed_signup">
         <form action="https://farm.us4.list-manage.com/subscribe/post?u=dc4b7d21454e517c9ec07574f&amp;id=dc05516961&amp;f_id=00e02beaf0 " method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank">
           <div id="mc_embed_signup_scroll">
-            <div class="mc-field-group"><label for="mce-EMAIL">Sign up here to keep in touch:</label><input type="email" name="EMAIL" class="required email" id="mce-EMAIL" required="" value=""></div>
+            <div class="mc-field-group" "><label for="mce-EMAIL">Sign up here to keep in touch: </label><input type="email" name="EMAIL" class="required email" id="mce-EMAIL" required="" value=""></div>
             <div id="mce-responses" class="clear">
               <div class="response" id="mce-error-response" style="display: none;"></div>
               <div class="response" id="mce-success-response" style="display: none;"></div>
@@ -191,6 +241,8 @@
       </div>
       <script type="text/javascript" src="//s3.amazonaws.com/downloads.mailchimp.com/js/mc-validate.js"></script><script type="text/javascript">(function($) {window.fnames = new Array(); window.ftypes = new Array();fnames[0]='EMAIL';ftypes[0]='email';fnames[1]='FNAME';ftypes[1]='text';fnames[2]='LNAME';ftypes[2]='text';fnames[3]='ADDRESS';ftypes[3]='address';fnames[4]='PHONE';ftypes[4]='phone';fnames[5]='BIRTHDAY';ftypes[5]='birthday';fnames[6]='COMPANY';ftypes[6]='text';}(jQuery));var $mcj = jQuery.noConflict(true);</script></div>
   </section>
+  
+
   <script>
     gsap.registerPlugin(ScrollTrigger);
 
