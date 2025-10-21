@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rhinebeck Village Farm Initiative</title>
 
-<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-<link rel="manifest" href="/site.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="manifest" href="/site.webmanifest">
 
   <link rel="stylesheet" href="https://use.typekit.net/guu0rbm.css">
   <script src="https://unpkg.com/gsap@3/dist/gsap.min.js"></script>
   <script src="https://unpkg.com/gsap@3/dist/ScrollTrigger.min.js"></script>
+
   <style>
     html, body {
       margin: 0;
@@ -37,7 +38,7 @@
       width: 80%;
       border-radius: 2rem;
       background-color: rgba(0, 153, 204, 0.65);
-      overflow: hidden;
+      overflow: visible; /* allow the ribbon tail */
       transition: height 0.3s ease;
     }
     .hero-box h1 {
@@ -105,13 +106,45 @@
       font-weight: bold;
       color: #fffd75;
       text-decoration: underline;
-	  background-color: #00000050;
-	  margin-left:0px;
-	  padding: 2px 16px 5px 16px;
-	  border-radius: 9px;
-	  white-space: nowrap;
-	  } 
+      background-color: #00000050;
+      margin-left: 0px;
+      padding: 2px 16px 5px 16px;
+      border-radius: 9px;
+      white-space: nowrap;
     }
+
+    /* Our Vision button */
+    .vision-link {
+      position: absolute;
+      top: -.7rem;
+      right: 0rem;
+      background: #d74b2f;
+      color: #fff !important;
+      font-weight: 400;
+      text-decoration: none;
+      font-size: clamp(21px, 1.4vw, 21px);
+      padding: 0.4rem 1rem;
+      border-radius: 0.6rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 5;
+      line-height: 1;
+    }
+	.vision-link::after {
+	content: "";
+	position: absolute;
+	top: 50%;
+	right: -11px;
+	transform: translateY(-50%);
+	border-style: solid;
+	border-width: 12px 0 12px 12px;
+	border-color: transparent transparent transparent #d74b2f;
+	}
+    .vision-link:hover,
+    .vision-link:focus-visible {
+      filter: brightness(1.05);
+      text-decoration: underline;
+    }
+
     #signup {
       min-height: 60vh;
       display: flex;
@@ -190,6 +223,7 @@
 <body>
   <section id="hero">
     <div class="hero-box">
+      <a href="mission.html" class="vision-link">Our Vision</a>
       <h1>
         Rooted in<br>
         Community,<br>
@@ -227,9 +261,9 @@
       <link href="//cdn-images.mailchimp.com/embedcode/classic-061523.css" rel="stylesheet" type="text/css">
       <style type="text/css"></style>
       <div id="mc_embed_signup">
-        <form action="https://farm.us4.list-manage.com/subscribe/post?u=dc4b7d21454e517c9ec07574f&amp;id=dc05516961&amp;f_id=00e02beaf0 " method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank">
+        <form action="https://farm.us4.list-manage.com/subscribe/post?u=dc4b7d21454e517c9ec07574f&amp;id=dc05516961&amp;f_id=00e02beaf0" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank">
           <div id="mc_embed_signup_scroll">
-            <div class="mc-field-group" "><label for="mce-EMAIL">Sign up here to keep in touch: </label><input type="email" name="EMAIL" class="required email" id="mce-EMAIL" required="" value=""></div>
+            <div class="mc-field-group"><label for="mce-EMAIL">Sign up here to keep in touch: </label><input type="email" name="EMAIL" class="required email" id="mce-EMAIL" required value=""></div>
             <div id="mce-responses" class="clear">
               <div class="response" id="mce-error-response" style="display: none;"></div>
               <div class="response" id="mce-success-response" style="display: none;"></div>
@@ -245,63 +279,41 @@
           </div>
         </form>
       </div>
-      <script type="text/javascript" src="//s3.amazonaws.com/downloads.mailchimp.com/js/mc-validate.js"></script><script type="text/javascript">(function($) {window.fnames = new Array(); window.ftypes = new Array();fnames[0]='EMAIL';ftypes[0]='email';fnames[1]='FNAME';ftypes[1]='text';fnames[2]='LNAME';ftypes[2]='text';fnames[3]='ADDRESS';ftypes[3]='address';fnames[4]='PHONE';ftypes[4]='phone';fnames[5]='BIRTHDAY';ftypes[5]='birthday';fnames[6]='COMPANY';ftypes[6]='text';}(jQuery));var $mcj = jQuery.noConflict(true);</script></div>
+      <script type="text/javascript" src="//s3.amazonaws.com/downloads.mailchimp.com/js/mc-validate.js"></script>
+      <script type="text/javascript">
+        (function($) {
+          window.fnames = new Array(); window.ftypes = new Array();
+          fnames[0]='EMAIL'; ftypes[0]='email';
+        }(jQuery));
+        var $mcj = jQuery.noConflict(true);
+      </script>
+    </div>
   </section>
-  
 
   <script>
     gsap.registerPlugin(ScrollTrigger);
 
-    // Buildings fade in
     gsap.to(".buildings-inside", {
-      scrollTrigger: {
-        trigger: "#hero h1",
-        start: "top center",
-        end: "bottom top",
-        scrub: true
-      },
-      opacity: 1,
-      y: 0
+      scrollTrigger: { trigger: "#hero h1", start: "top center", end: "bottom top", scrub: true },
+      opacity: 1, y: 0
     });
 
-    // Green expands slightly to fit logo
     gsap.to(".green-inside", {
-      scrollTrigger: {
-        trigger: ".buildings-inside",
-        start: "top center",
-        end: "bottom center",
-        scrub: true
-      },
+      scrollTrigger: { trigger: ".buildings-inside", start: "top center", end: "bottom center", scrub: true },
       height: "22vh"
     });
 
-    // Logo fades and scales in
     gsap.to(".logo-inside", {
-      scrollTrigger: {
-        trigger: ".buildings-inside",
-        start: "top center",
-        end: "bottom center",
-        scrub: true
-      },
-      opacity: 1,
-      scale: 1
+      scrollTrigger: { trigger: ".buildings-inside", start: "top center", end: "bottom center", scrub: true },
+      opacity: 1, scale: 1
     });
 
-    // Signup fade-in
     gsap.to(".signup-form", {
-      scrollTrigger: {
-        trigger: "#signup",
-        start: "top center",
-        end: "bottom center",
-        scrub: true
-      },
-      opacity: 1,
-      y: 0
+      scrollTrigger: { trigger: "#signup", start: "top center", end: "bottom center", scrub: true },
+      opacity: 1, y: 0
     });
   </script>
-	
-	<br>	<br>	<br>	<br>	<br>
-	
-	
+
+  <br><br><br><br><br>
 </body>
 </html>
